@@ -6,8 +6,7 @@ import numpy as np
 
 wav_path = "C:\\Users\\smith\\Downloads\\Sounddogs_Order\\" \
 			"Humvee, Onb,55 MPH,Start Idle Revs,Drive Fast,Uphill Accelerate H,6003_966817.wav"
-normal = "Z:\\SFX Library\\Digital Juice\\Digital Juice Files\\SFX_V04D05D\\Human\\" \
-			"AmericanPoliticsMale\\As Maine Goes So Goes The Nation Male English 2.Wav"
+normal = "C:\\Users\\smith\\Downloads\\Sounddogs_Order\\Humvee Door O C_808671.wav"
 wav_96k = "Z:\\SFX Library\\SoundDogs\\" \
 			"Humvee M998,Pavement,50 MPH,Pass Bys x2 Med Fast,Approach Pothole,5954_966759.wav"
 mp3_path = "Z:\\SFX Library\\ProSound\\2013 Flying Proms Junkers Ju 52 flight.mp3"
@@ -48,7 +47,7 @@ class WavPlayer:
 		self.audio_player = AudioThread()
 		self.audio_player_thread = threading.Thread(target=self.audio_player.run_loop)
 		self.audio_player_thread.start()
-		self.audio_buffer = AudioBuffer(self.audio_player)
+		self.audio_buffer = AudioBuffer()
 		self.audio_buffer_thread = threading.Thread(target=self.audio_buffer.buffer_loop)
 		self.audio_buffer_thread.start()
 		self.playing = False
@@ -58,28 +57,28 @@ class WavPlayer:
 
 	def load(self, path):
 		self.audio_buffer.load(path)
-		self.audio_player.load(self.audio_buffer.sound_info.samplerate, self.audio_buffer.CHUNK_SIZE)
+		self.audio_player.load(self.audio_buffer.sound_info.samplerate, self.audio_buffer.CHUNK_SIZE,
+								self.audio_buffer.get_buffer)
 
 	def play(self):
-		self.audio_player.should_read = True
+		self.audio_player.play()
 		self.playing = True
 
 	def pause(self):
-		self.audio_player.should_read = False
+		self.audio_player.pause()
 		self.playing = False
 		self.paused = True
 
 
 class AudioBuffer:
-	SUM_TO_MONO = True
+	SUM_TO_MONO = False
 	PLAY_INDIVIDUAL_CHANNEL = 0
 	PITCH_SHIFT = 0
 	TIME_SHIFT = 0
-	CHUNK_SIZE = 96000
+	CHUNK_SIZE = 1024
 
-	def __init__(self, audio_player):
+	def __init__(self):
 		self.sound_file = None
-		self.audio_player = audio_player
 		self.buffer = None
 		self.got_buffer = True
 		self.path = None
@@ -88,7 +87,7 @@ class AudioBuffer:
 	def buffer_loop(self):
 		while True:
 			while self.sound_file:
-				self.audio_player.stream.read(self.set_buffer())
+				self.set_buffer()
 			time.sleep(.03)
 
 	def load(self, path):
@@ -98,12 +97,14 @@ class AudioBuffer:
 
 	def set_buffer(self):
 		data = self.sound_file.read(self.CHUNK_SIZE)
-		self.buffer = self.run_data_through_processes(data, self.get_processes())
+		# self.buffer = self.run_data_through_processes(data, self.get_processes())
+		self.buffer = data
 		self.got_buffer = False
 
-	def get_buffer(self):
+	def get_buffer(self, outdata, frames, time, status):
 		self.got_buffer = True
-		return self.buffer
+		print(self.buffer)
+		outdata[:] = self.buffer
 
 	@staticmethod
 	def run_data_through_processes(data, processes):
@@ -136,11 +137,12 @@ class AudioBuffer:
 class AudioThread:
 	def __init__(self):
 		self.stream = None
-		self.should_read = False
+		self.should_start = False
+		self.should_stop = False
 
-	def load(self, sample_rate, block):
+	def load(self, sample_rate, block, callback):
 		self.reset()
-		self.stream = sd.Stream(samplerate=sample_rate, blocksize=block)
+		self.stream = sd.OutputStream(samplerate=sample_rate, blocksize=block, callback=callback)
 
 	def reset(self):
 		try:
@@ -148,19 +150,25 @@ class AudioThread:
 		except AttributeError:
 			pass
 
+	def play(self):
+		self.should_start = True
+
 	def pause(self):
-		self.stream.stop()
+		self.should_stop = True
 
 	def run_loop(self):
 		while True:
-			while self.should_read:
+			if self.should_start:
 				self.stream.start()
-				self.should_read = False
+				self.should_start = False
+			elif self.should_stop:
+				self.stream.stop()
+				self.should_stop = False
 			time.sleep(.01)
 
 
 p = WavPlayer()
-p.load(wav_path)
+p.load(normal)
 p.play()
 
 while True:
