@@ -4,12 +4,14 @@ import threading
 import time
 import numpy as np
 
-wav_path = "C:\\Users\\smith\\Downloads\\Sounddogs_Order\\" \
+wav_path = "Z:\\SFX Library\\SoundDogs\\" \
 			"Humvee, Onb,55 MPH,Start Idle Revs,Drive Fast,Uphill Accelerate H,6003_966817.wav"
-normal = "C:\\Users\\smith\\Downloads\\Sounddogs_Order\\Humvee Door O C_808671.wav"
+normal = "Z:\\SFX Library\\SoundDogs\\M4 Grenade Launcher,Shots,Single x3 Double x1 Burst x20,C-Hard Mi,7242_966594.wav"
 wav_96k = "Z:\\SFX Library\\SoundDogs\\" \
 			"Humvee M998,Pavement,50 MPH,Pass Bys x2 Med Fast,Approach Pothole,5954_966759.wav"
 mp3_path = "Z:\\SFX Library\\ProSound\\2013 Flying Proms Junkers Ju 52 flight.mp3"
+count_path = "Z:\\SFX Library\\Digital Juice\\Digital Juice Files\\SFX_V01D07D\\Human\\OnTheSet\\" \
+				"Check One, Two, Three Testing.Wav"
 BLOCK_SIZE = 1024
 
 
@@ -47,7 +49,7 @@ class WavPlayer:
 		self.audio_player = AudioThread()
 		self.audio_player_thread = threading.Thread(target=self.audio_player.run_loop)
 		self.audio_player_thread.start()
-		self.audio_buffer = AudioBuffer()
+		self.audio_buffer = AudioBuffer(self.end)
 		self.audio_buffer_thread = threading.Thread(target=self.audio_buffer.buffer_loop)
 		self.audio_buffer_thread.start()
 		self.playing = False
@@ -57,8 +59,21 @@ class WavPlayer:
 
 	def load(self, path):
 		self.audio_buffer.load(path)
+		self.determine_summing_policy()
+		self.audio_buffer.processes = self.audio_buffer.get_processes()
+		self.audio_buffer.CHUNK_SIZE = self.audio_buffer.get_recommended_chunk_size()
 		self.audio_player.load(self.audio_buffer.sound_info.samplerate, self.audio_buffer.CHUNK_SIZE,
-								self.audio_buffer.get_buffer)
+								self.audio_buffer.channels, self.audio_buffer.get_buffer)
+
+	def determine_summing_policy(self):
+		if self.audio_buffer.sound_info.channels > 2:
+			self.audio_buffer.SUM_TO_MONO = True
+		else:
+			self.audio_buffer.SUM_TO_MONO = False
+
+	def end(self):
+		self.ended = True
+		raise sd.CallbackStop
 
 	def play(self):
 		self.audio_player.play()
@@ -66,8 +81,16 @@ class WavPlayer:
 
 	def pause(self):
 		self.audio_player.pause()
-		self.playing = False
 		self.paused = True
+
+	def stop(self):
+		self.playing = False
+
+	def goto(self, goto):
+		self.audio_player.pause()
+		self.audio_buffer.seek(goto)
+		if self.playing and not self.paused:
+			self.play()
 
 
 class AudioBuffer:
@@ -75,36 +98,72 @@ class AudioBuffer:
 	PLAY_INDIVIDUAL_CHANNEL = 0
 	PITCH_SHIFT = 0
 	TIME_SHIFT = 0
-	CHUNK_SIZE = 1024
+	CHUNK_SIZE = 5024
 
-	def __init__(self):
+	def __init__(self, end_callback):
+		self.end_callback = end_callback
 		self.sound_file = None
-		self.buffer = None
-		self.got_buffer = True
+		self.buffer = []
 		self.path = None
 		self.sound_info = None
+		self.finished = False
+		self.loaded = False
+		self.processes = []
+
+	@property
+	def channels(self):
+		if self.SUM_TO_MONO or self.sound_info.channels == 1:
+			return 1
+		return 2
 
 	def buffer_loop(self):
 		while True:
 			while self.sound_file:
 				self.set_buffer()
+				self.loaded = True
 			time.sleep(.03)
 
 	def load(self, path):
+		self.finished = False
 		self.path = path
 		self.sound_file = soundfile.SoundFile(path)
 		self.sound_info = soundfile.info(path)
 
 	def set_buffer(self):
-		data = self.sound_file.read(self.CHUNK_SIZE)
-		# self.buffer = self.run_data_through_processes(data, self.get_processes())
-		self.buffer = data
-		self.got_buffer = False
+		if len(self.buffer) < 50 and not self.finished:
+			print(len(self.buffer))
+			data = self.pad_sound(self.sound_file.read(self.CHUNK_SIZE))
+			self.buffer.append(self.run_data_through_processes(data, self.processes))
+
+	def seek(self, goto):
+		"""
+		Set read from frame
+		:param goto:
+			should be in milliseconds
+		"""
+		goto_frame = int(self.sound_info.samplerate * (goto / 1000))
+		self.buffer = []
+		print(goto_frame)
+		self.sound_file.seek(goto_frame)
+
+	def pad_sound(self, data):
+		data_chunk_size = data.shape[0]
+		if 0 < data_chunk_size < self.CHUNK_SIZE:
+			data = np.pad(data, [(0, self.CHUNK_SIZE - data_chunk_size), (0, 0)], mode='constant')
+			self.finished = True
+		return data
+
+	def get_recommended_chunk_size(self):
+		"""Make sure to set processes first"""
+		chunk_size = 5120
+		if self.sound_info.channels > 2:
+			chunk_size += 1024 * (self.sound_info.channels - 2)
+		return chunk_size
 
 	def get_buffer(self, outdata, frames, time, status):
-		self.got_buffer = True
-		print(self.buffer)
-		outdata[:] = self.buffer
+		outdata[:] = self.buffer.pop(0)
+		if self.finished and len(self.buffer) == 0:
+			self.end_callback()
 
 	@staticmethod
 	def run_data_through_processes(data, processes):
@@ -120,13 +179,12 @@ class AudioBuffer:
 			processes.append(self.sum_to_mono)
 		return processes
 
-	@staticmethod
-	def sum_to_mono(data):
-		sound_data = np.average(data, axis=1)
+	def sum_to_mono(self, data):
+		sound_data = np.ndarray(buffer=np.average(data, axis=1), shape=(self.CHUNK_SIZE, 1))
 		return sound_data
 
 	def get_individual_channel(self, data):
-		return self.get_individual_channels(data)[self.PLAY_INDIVIDUAL_CHANNEL]
+		return self.get_individual_channels(data)[self.PLAY_INDIVIDUAL_CHANNEL-1]
 
 	@staticmethod
 	def get_individual_channels(data):
@@ -140,9 +198,9 @@ class AudioThread:
 		self.should_start = False
 		self.should_stop = False
 
-	def load(self, sample_rate, block, callback):
+	def load(self, sample_rate, block, channels, callback):
 		self.reset()
-		self.stream = sd.OutputStream(samplerate=sample_rate, blocksize=block, callback=callback)
+		self.stream = sd.OutputStream(samplerate=sample_rate, blocksize=block, channels=channels, callback=callback)
 
 	def reset(self):
 		try:
@@ -151,6 +209,7 @@ class AudioThread:
 			pass
 
 	def play(self):
+		print('play')
 		self.should_start = True
 
 	def pause(self):
@@ -168,7 +227,12 @@ class AudioThread:
 
 
 p = WavPlayer()
-p.load(normal)
+p.load(wav_path)
+while not p.audio_buffer.loaded:
+	time.sleep(.001)
+p.play()
+time.sleep(2)
+p.goto(10000)
 p.play()
 
 while True:
