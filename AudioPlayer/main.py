@@ -4,54 +4,31 @@ import threading
 import time
 import numpy as np
 
-wav_path = "Z:\\SFX Library\\SoundDogs\\" \
-			"Humvee, Onb,55 MPH,Start Idle Revs,Drive Fast,Uphill Accelerate H,6003_966817.wav"
-normal = "Z:\\SFX Library\\SoundDogs\\M4 Grenade Launcher,Shots,Single x3 Double x1 Burst x20,C-Hard Mi,7242_966594.wav"
-wav_96k = "Z:\\SFX Library\\SoundDogs\\" \
-			"Humvee M998,Pavement,50 MPH,Pass Bys x2 Med Fast,Approach Pothole,5954_966759.wav"
-mp3_path = "Z:\\SFX Library\\ProSound\\2013 Flying Proms Junkers Ju 52 flight.mp3"
-count_path = "Z:\\SFX Library\\Digital Juice\\Digital Juice Files\\SFX_V01D07D\\Human\\OnTheSet\\" \
-				"Check One, Two, Three Testing.Wav"
-BLOCK_SIZE = 1024
+# TODO Add pitch and time shifting
+# TODO Add custom dithering
 
+# wav_path = "Z:\\SFX Library\\SoundDogs\\" \
+# 			"Humvee, Onb,55 MPH,Start Idle Revs,Drive Fast,Uphill Accelerate H,6003_966817.wav"
+# normal = "Z:\\SFX Library\\SoundDogs\\M4 Grenade Launcher,Shots,Single x3 Double
+# x1 Burst x20,C-Hard Mi,7242_966594.wav"
+# wav_96k = "Z:\\SFX Library\\SoundDogs\\" \
+# 			"Humvee M998,Pavement,50 MPH,Pass Bys x2 Med Fast,Approach Pothole,5954_966759.wav"
+# mp3_path = "Z:\\SFX Library\\ProSound\\2013 Flying Proms Junkers Ju 52 flight.mp3"
+# count_path = "Z:\\SFX Library\\Digital Juice\\Digital Juice Files\\SFX_V01D07D\\Human\\OnTheSet\\" \
+# 				"Check One, Two, Three Testing.Wav"
+# ogg_path = "Z:\\SFX Library\\Digital Juice\\Digital Juice Files\\SFX_V03D01D_V2\\General\\Transportation\\" \
+# 			"Train By 2.Ogg"
+# flac_path = "C:\\Users\\Josh\\Downloads\\455746__kyles__door-apartment-buzzer-unlock-ext.flac"
 
-def try_to_check_if_none(value):
-	try:
-		if not value:
-			return True
-		else:
-			return False
-	except ValueError:
-		return False
-
-
-# sr = soundfile.info(wav_path).samplerate
-# start = time.time()
-# data_array = None
-# for block in soundfile.blocks(wav_path, BLOCK_SIZE, 0):
-# 	if block.shape[1] > 2:
-# 		block = block.flatten()
-	# 	print(block)
-	# if try_to_check_if_none(data_array):
-	# 	data_array = block
-	# else:
-	# 	data_array = np.append(data_array, block)
-	# print('test')
-# start = time.time()
-# data, sample_rate = soundfile.read(wav_path)
-# print(data)
-# data = np.ndarray.flatten(data)
-# data.sum(axis=1)/2
-# sd.play(data, sample_rate)
 
 class WavPlayer:
 	def __init__(self):
-		self.audio_player = AudioThread()
-		self.audio_player_thread = threading.Thread(target=self.audio_player.run_loop)
-		self.audio_player_thread.start()
 		self.audio_buffer = AudioBuffer(self.end)
 		self.audio_buffer_thread = threading.Thread(target=self.audio_buffer.buffer_loop)
 		self.audio_buffer_thread.start()
+		self.audio_player = AudioThread(self.audio_buffer.ready)
+		self.audio_player_thread = threading.Thread(target=self.audio_player.run_loop)
+		self.audio_player_thread.start()
 		self.playing = False
 		self.paused = False
 		self.ended = False
@@ -59,11 +36,34 @@ class WavPlayer:
 
 	def load(self, path):
 		self.audio_buffer.load(path)
-		self.determine_summing_policy()
 		self.audio_buffer.processes = self.audio_buffer.get_processes()
 		self.audio_buffer.CHUNK_SIZE = self.audio_buffer.get_recommended_chunk_size()
 		self.audio_player.load(self.audio_buffer.sound_info.samplerate, self.audio_buffer.CHUNK_SIZE,
 								self.audio_buffer.channels, self.audio_buffer.get_buffer)
+
+	@property
+	def selected_channels(self):
+		return self.audio_buffer.PLAY_INDIVIDUAL_CHANNELS
+
+	@selected_channels.setter
+	def selected_channels(self, value: list):
+		self.audio_buffer.PLAY_INDIVIDUAL_CHANNELS = value
+
+	@property
+	def sum_to_mono(self):
+		return self.audio_buffer.SUM_TO_MONO
+
+	@sum_to_mono.setter
+	def sum_to_mono(self, value: bool):
+		self.audio_buffer.SUM_TO_MONO = value
+
+	@property
+	def chunk_size(self):
+		return self.audio_buffer.CHUNK_SIZE
+
+	@chunk_size.setter
+	def chunk_size(self, value: int):
+		self.audio_buffer.CHUNK_SIZE = value
 
 	def determine_summing_policy(self):
 		if self.audio_buffer.sound_info.channels > 2:
@@ -95,10 +95,10 @@ class WavPlayer:
 
 class AudioBuffer:
 	SUM_TO_MONO = False
-	PLAY_INDIVIDUAL_CHANNEL = 0
+	PLAY_INDIVIDUAL_CHANNELS = []
 	PITCH_SHIFT = 0
 	TIME_SHIFT = 0
-	CHUNK_SIZE = 5024
+	CHUNK_SIZE = 1024
 
 	def __init__(self, end_callback):
 		self.end_callback = end_callback
@@ -116,6 +116,9 @@ class AudioBuffer:
 			return 1
 		return 2
 
+	def ready(self):
+		return len(self.buffer) > 0
+
 	def buffer_loop(self):
 		while True:
 			while self.sound_file:
@@ -131,8 +134,8 @@ class AudioBuffer:
 
 	def set_buffer(self):
 		if len(self.buffer) < 50 and not self.finished:
-			print(len(self.buffer))
-			data = self.pad_sound(self.sound_file.read(self.CHUNK_SIZE))
+			data = self.get_correct_amount_of_channels(self.get_selected_channels(self.sound_file.read(self.CHUNK_SIZE)))
+			data = self.pad_sound(data)
 			self.buffer.append(self.run_data_through_processes(data, self.processes))
 
 	def seek(self, goto):
@@ -143,8 +146,10 @@ class AudioBuffer:
 		"""
 		goto_frame = int(self.sound_info.samplerate * (goto / 1000))
 		self.buffer = []
-		print(goto_frame)
-		self.sound_file.seek(goto_frame)
+		try:
+			self.sound_file.seek(goto_frame)
+		except RuntimeError:
+			self.sound_file.seek(self.sound_info.frames-1)
 
 	def pad_sound(self, data):
 		data_chunk_size = data.shape[0]
@@ -155,9 +160,11 @@ class AudioBuffer:
 
 	def get_recommended_chunk_size(self):
 		"""Make sure to set processes first"""
-		chunk_size = 5120
+		chunk_size = 1024
 		if self.sound_info.channels > 2:
 			chunk_size += 1024 * (self.sound_info.channels - 2)
+		if len(self.PLAY_INDIVIDUAL_CHANNELS) > 0:
+			chunk_size += 1024
 		return chunk_size
 
 	def get_buffer(self, outdata, frames, time, status):
@@ -173,18 +180,34 @@ class AudioBuffer:
 
 	def get_processes(self):
 		processes = []
-		if self.PLAY_INDIVIDUAL_CHANNEL > 0:
-			processes.append(self.get_individual_channel)
-		if self.SUM_TO_MONO:
-			processes.append(self.sum_to_mono)
 		return processes
 
+	def get_correct_amount_of_channels(self, data):
+		try:
+			if data.shape[1] > 2 or self.SUM_TO_MONO or len(self.PLAY_INDIVIDUAL_CHANNELS) > 0:
+				return self.sum_to_mono(data)
+		except IndexError:
+			return np.ndarray(buffer=data, shape=(data.shape[0], 1))
+		return data
+
 	def sum_to_mono(self, data):
-		sound_data = np.ndarray(buffer=np.average(data, axis=1), shape=(self.CHUNK_SIZE, 1))
+		sound_data = np.ndarray(buffer=np.average(data, axis=1), shape=(data.shape[0], 1))
 		return sound_data
 
-	def get_individual_channel(self, data):
-		return self.get_individual_channels(data)[self.PLAY_INDIVIDUAL_CHANNEL-1]
+	def get_selected_channels(self, data):
+		if len(self.PLAY_INDIVIDUAL_CHANNELS) > 0:
+			return self._get_selected_channels_from_play_channels(data)
+		return data
+
+	def _get_selected_channels_from_play_channels(self, data):
+		channels = self.get_individual_channels(data)
+		selected_channels = np.ndarray((data.shape[0], 0))
+		for channel_number in self.PLAY_INDIVIDUAL_CHANNELS:
+			try:
+				selected_channels = np.concatenate((selected_channels, channels[channel_number-1]), axis=1)
+			except IndexError:
+				continue
+		return selected_channels
 
 	@staticmethod
 	def get_individual_channels(data):
@@ -193,7 +216,8 @@ class AudioBuffer:
 
 
 class AudioThread:
-	def __init__(self):
+	def __init__(self, ready_callback):
+		self.ready_callback = ready_callback
 		self.stream = None
 		self.should_start = False
 		self.should_stop = False
@@ -209,31 +233,26 @@ class AudioThread:
 			pass
 
 	def play(self):
-		print('play')
 		self.should_start = True
 
 	def pause(self):
-		self.should_stop = True
+		self.stream.stop()
 
 	def run_loop(self):
 		while True:
-			if self.should_start:
+			if self.should_start and self.ready_callback():
 				self.stream.start()
 				self.should_start = False
-			elif self.should_stop:
-				self.stream.stop()
-				self.should_stop = False
-			time.sleep(.01)
+			time.sleep(.005)
 
 
-p = WavPlayer()
-p.load(wav_path)
-while not p.audio_buffer.loaded:
-	time.sleep(.001)
-p.play()
-time.sleep(2)
-p.goto(10000)
-p.play()
-
-while True:
-	time.sleep(1)
+# p = WavPlayer()
+# p.load(wav_path)
+# while not p.audio_buffer.loaded:
+# 	time.sleep(.001)
+# p.play()
+# time.sleep(2)
+# # p.goto(10000)
+#
+# while True:
+# 	time.sleep(1)
