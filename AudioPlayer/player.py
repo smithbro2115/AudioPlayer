@@ -21,7 +21,7 @@ import numpy as np
 # flac_path = "C:\\Users\\Josh\\Downloads\\455746__kyles__door-apartment-buzzer-unlock-ext.flac"
 
 
-class WavPlayer:
+class Player:
 	def __init__(self):
 		self.audio_buffer = AudioBuffer(self.end)
 		self.audio_buffer_thread = threading.Thread(target=self.audio_buffer.buffer_loop)
