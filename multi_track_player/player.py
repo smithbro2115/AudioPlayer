@@ -84,6 +84,8 @@ class Player:
 		self.paused = True
 
 	def stop(self):
+		self.audio_buffer.stop()
+		self.audio_player.stop()
 		self.playing = False
 
 	def goto(self, goto):
@@ -150,6 +152,10 @@ class AudioBuffer:
 			self.sound_file.seek(goto_frame)
 		except RuntimeError:
 			self.sound_file.seek(self.sound_info.frames-1)
+
+	def stop(self):
+		self.sound_file = None
+		self.buffer = []
 
 	def pad_sound(self, data):
 		data_chunk_size = data.shape[0]
@@ -237,6 +243,10 @@ class AudioThread:
 
 	def pause(self):
 		self.stream.stop()
+
+	def stop(self):
+		self.pause()
+		self.stream = None
 
 	def run_loop(self):
 		while True:
