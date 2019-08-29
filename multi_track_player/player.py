@@ -11,8 +11,8 @@ import numpy as np
 # 			"Humvee, Onb,55 MPH,Start Idle Revs,Drive Fast,Uphill Accelerate H,6003_966817.wav"
 # normal = "Z:\\SFX Library\\SoundDogs\\M4 Grenade Launcher,Shots,Single x3 Double
 # x1 Burst x20,C-Hard Mi,7242_966594.wav"
-# wav_96k = "Z:\\SFX Library\\SoundDogs\\" \
-# 			"Humvee M998,Pavement,50 MPH,Pass Bys x2 Med Fast,Approach Pothole,5954_966759.wav"
+# wav_96k = "C:\\Users\\smith\\Downloads\\Sounddogs_Order\\" \
+# 			"Humvee, Onb,55 MPH,Start Idle Revs,Drive Fast,Uphill Accelerate H,6003_966817.wav"
 # mp3_path = "Z:\\SFX Library\\ProSound\\2013 Flying Proms Junkers Ju 52 flight.mp3"
 # count_path = "Z:\\SFX Library\\Digital Juice\\Digital Juice Files\\SFX_V01D07D\\Human\\OnTheSet\\" \
 # 				"Check One, Two, Three Testing.Wav"
@@ -246,13 +246,14 @@ class AudioThread:
 			time.sleep(.005)
 
 
-# p = WavPlayer()
-# p.load(wav_path)
+# p = Player()
+# p.load(wav_96k)
+# p.selected_channels = [1, 5, 7]
 # while not p.audio_buffer.loaded:
 # 	time.sleep(.001)
 # p.play()
 # time.sleep(2)
-# # p.goto(10000)
+# p.goto(10000)
 #
 # while True:
 # 	time.sleep(1)
