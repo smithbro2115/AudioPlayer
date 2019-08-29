@@ -1,5 +1,7 @@
 from setuptools import setup
 
+with open('requirements.txt', 'r') as f:
+    requirements = f.read()
 
 setup(name='multi_track_player',
       version='0.1',
@@ -8,4 +10,5 @@ setup(name='multi_track_player',
       author_email="smithbro2115@gmail.com",
       license='MIT',
       packages=['multi_track_player'],
+      install_requires=[requirements],
       zip_safe=False)

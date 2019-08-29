@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/AudioPlayer.iml" filepath="$PROJECT_DIR$/.idea/AudioPlayer.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/multi_track_player.iml" filepath="$PROJECT_DIR$/.idea/multi_track_player.iml" />
     </modules>
   </component>
 </project>
