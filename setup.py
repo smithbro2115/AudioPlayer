@@ -7,5 +7,5 @@ setup(name='multi_track_player',
       author="smithbro",
       author_email="smithbro2115@gmail.com",
       license='MIT',
-      packages=['player'],
+      packages=['multi_track_player'],
       zip_safe=False)
