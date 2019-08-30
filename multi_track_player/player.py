@@ -1,14 +1,17 @@
 import soundfile
 import sounddevice as sd
 import threading
+import multiprocessing
+from ctypes import c_char_p
 import time
+import datetime
 import numpy as np
 
 # TODO Add pitch and time shifting
 # TODO Add custom dithering
 
-# wav_path = "Z:\\SFX Library\\SoundDogs\\" \
-# 			"Humvee, Onb,55 MPH,Start Idle Revs,Drive Fast,Uphill Accelerate H,6003_966817.wav"
+wav_path = "Z:\\SFX Library\\SoundDogs\\" \
+			"Humvee, Onb,55 MPH,Start Idle Revs,Drive Fast,Uphill Accelerate H,6003_966817.wav"
 # normal = "Z:\\SFX Library\\SoundDogs\\M4 Grenade Launcher,Shots,Single x3 Double
 # x1 Burst x20,C-Hard Mi,7242_966594.wav"
 # wav_96k = "C:\\Users\\smith\\Downloads\\Sounddogs_Order\\" \
@@ -21,14 +24,74 @@ import numpy as np
 # flac_path = "C:\\Users\\Josh\\Downloads\\455746__kyles__door-apartment-buzzer-unlock-ext.flac"
 
 
+def loop(connection):
+	player = Player()
+	while True:
+		try:
+			msg = connection.recv()
+		except EOFError:
+			pass
+		else:
+			if msg[0] == 'load':
+				print('load')
+				player.load(msg[1])
+			elif msg[0] == 'play':
+				print('play')
+				player.play()
+			elif msg[0] == 'pause':
+				print('pause')
+				player.pause()
+			elif msg[0] == 'end':
+				print('end')
+				player.end()
+			elif msg[0] == 'goto':
+				print('goto')
+				player.goto(msg[1])
+			elif msg[0] == 'stop':
+				print('stop')
+				player.stop()
+			elif msg == 'is_playing':
+				connection.send(player.audio_playing)
+			else:
+				pass
+		time.sleep(.02)
+
+
+class PlayerProcess:
+	def __init__(self):
+		self.player = Player()
+		self.parent_conn, self.child_conn = multiprocessing.Pipe()
+		self.process = multiprocessing.Process(target=loop, args=(self.child_conn,))
+		self.process.start()
+
+	def play(self):
+		self.parent_conn.send(('play',))
+
+	def get_playing(self):
+		self.parent_conn.send('is_playing')
+		msg = self.parent_conn.recv()
+		return msg
+
+	def pause(self):
+		self.parent_conn.send(('pause',))
+
+	def load(self, path):
+		self.parent_conn.send(('load', path))
+
+	def goto(self, goto):
+		self.parent_conn.send(('goto', goto))
+
+	def stop(self):
+		self.parent_conn.send(('stop',))
+
+
 class Player:
 	def __init__(self):
 		self.audio_buffer = AudioBuffer(self.end)
 		self.audio_buffer_thread = threading.Thread(target=self.audio_buffer.buffer_loop)
 		self.audio_buffer_thread.start()
 		self.audio_player = AudioThread(self.audio_buffer.ready)
-		self.audio_player_thread = threading.Thread(target=self.audio_player.run_loop)
-		self.audio_player_thread.start()
+		self.audio_player_thread = None
 		self.playing = False
 		self.paused = False
 		self.ended = False
@@ -37,9 +100,14 @@ class Player:
 	def load(self, path):
 		self.audio_buffer.load(path)
 		self.audio_buffer.processes = self.audio_buffer.get_processes()
-		self.audio_buffer.CHUNK_SIZE = self.audio_buffer.get_recommended_chunk_size()
+		# self.audio_buffer.CHUNK_SIZE = self.audio_buffer.get_recommended_chunk_size()
+		self.audio_buffer.chunk_set = True
 		self.audio_player.load(self.audio_buffer.sound_info.samplerate, self.audio_buffer.CHUNK_SIZE,
 								self.audio_buffer.channels, self.audio_buffer.get_buffer)
+
+	@property
+	def audio_playing(self):
+		return not self.audio_player.should_start and self.playing and not self.paused
 
 	@property
 	def selected_channels(self):
@@ -65,6 +133,10 @@ class Player:
 	def chunk_size(self, value: int):
 		self.audio_buffer.CHUNK_SIZE = value
 
+	def start_audio_thread(self):
+		self.audio_player_thread = threading.Thread(target=self.audio_player.run_loop)
+		self.audio_player_thread.start()
+
 	def determine_summing_policy(self):
 		if self.audio_buffer.sound_info.channels > 2:
 			self.audio_buffer.SUM_TO_MONO = True
@@ -77,7 +149,9 @@ class Player:
 
 	def play(self):
 		self.audio_player.play()
+		self.start_audio_thread()
 		self.playing = True
+		self.paused = False
 
 	def pause(self):
 		self.audio_player.pause()
@@ -110,6 +184,7 @@ class AudioBuffer:
 		self.sound_info = None
 		self.finished = False
 		self.loaded = False
+		self.chunk_set = False
 		self.processes = []
 
 	@property
@@ -123,7 +198,7 @@ class AudioBuffer:
 
 	def buffer_loop(self):
 		while True:
-			while self.sound_file:
+			while self.sound_file and len(self.buffer) < 50 and not self.finished:
 				self.set_buffer()
 				self.loaded = True
 			time.sleep(.03)
@@ -135,10 +210,9 @@ class AudioBuffer:
 		self.sound_info = soundfile.info(path)
 
 	def set_buffer(self):
-		if len(self.buffer) < 50 and not self.finished:
-			data = self.get_correct_amount_of_channels(self.get_selected_channels(self.sound_file.read(self.CHUNK_SIZE)))
-			data = self.pad_sound(data)
-			self.buffer.append(self.run_data_through_processes(data, self.processes))
+		data = self.get_correct_amount_of_channels(self.get_selected_channels(self.sound_file.read(self.CHUNK_SIZE)))
+		data = self.pad_sound(data)
+		self.buffer.append(self.run_data_through_processes(data, self.processes))
 
 	def seek(self, goto):
 		"""
@@ -155,6 +229,7 @@ class AudioBuffer:
 
 	def stop(self):
 		self.sound_file = None
+		self.chunk_set = False
 		self.buffer = []
 
 	def pad_sound(self, data):
@@ -253,17 +328,18 @@ class AudioThread:
 			if self.should_start and self.ready_callback():
 				self.stream.start()
 				self.should_start = False
-			time.sleep(.005)
+				break
+			time.sleep(.03)
 
 
-# p = Player()
-# p.load(wav_96k)
-# p.selected_channels = [1, 5, 7]
-# while not p.audio_buffer.loaded:
-# 	time.sleep(.001)
-# p.play()
-# time.sleep(2)
-# p.goto(10000)
-#
-# while True:
-# 	time.sleep(1)
+if __name__ == "__main__":
+	p = PlayerProcess()
+	p.load(wav_path)
+	# while not p.audio_buffer.loaded:
+	# 	time.sleep(.001)
+	p.play()
+	time.sleep(5)
+	p.goto(10000)
+
+	while True:
+		time.sleep(1)
