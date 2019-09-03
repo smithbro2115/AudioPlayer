@@ -10,12 +10,12 @@ import numpy as np
 # TODO Add pitch and time shifting
 # TODO Add custom dithering
 
-wav_path = "Z:\\SFX Library\\SoundDogs\\" \
-			"Humvee, Onb,55 MPH,Start Idle Revs,Drive Fast,Uphill Accelerate H,6003_966817.wav"
+# wav_path = "Z:\\SFX Library\\SoundDogs\\" \
+# 			"Humvee, Onb,55 MPH,Start Idle Revs,Drive Fast,Uphill Accelerate H,6003_966817.wav"
 # normal = "Z:\\SFX Library\\SoundDogs\\M4 Grenade Launcher,Shots,Single x3 Double
 # x1 Burst x20,C-Hard Mi,7242_966594.wav"
-# wav_96k = "C:\\Users\\smith\\Downloads\\Sounddogs_Order\\" \
-# 			"Humvee, Onb,55 MPH,Start Idle Revs,Drive Fast,Uphill Accelerate H,6003_966817.wav"
+wav_96k = "C:\\Users\\smith\\Downloads\\Sounddogs_Order\\" \
+			"Humvee, Onb,55 MPH,Start Idle Revs,Drive Fast,Uphill Accelerate H,6003_966817.wav"
 # mp3_path = "Z:\\SFX Library\\ProSound\\2013 Flying Proms Junkers Ju 52 flight.mp3"
 # count_path = "Z:\\SFX Library\\Digital Juice\\Digital Juice Files\\SFX_V01D07D\\Human\\OnTheSet\\" \
 # 				"Check One, Two, Three Testing.Wav"
@@ -50,6 +50,10 @@ def loop(connection):
 			elif msg[0] == 'stop':
 				print('stop')
 				player.stop()
+			elif msg[0] == 'set_volume':
+				player.volume = msg[1]
+			elif msg[0] == 'set_channels':
+				player.audio_buffer.PLAY_INDIVIDUAL_CHANNELS = msg[1]
 			elif msg == 'is_playing':
 				connection.send(player.audio_playing)
 			else:
@@ -84,6 +88,12 @@ class PlayerProcess:
 	def stop(self):
 		self.parent_conn.send(('stop',))
 
+	def set_volume(self, volume_percentage: int):
+		self.parent_conn.send(('set_volume', volume_percentage))
+
+	def set_channels(self, channels: list):
+		self.parent_conn.send(('set_channels', channels))
+
 
 class Player:
 	def __init__(self):
@@ -96,6 +106,20 @@ class Player:
 		self.paused = False
 		self.ended = False
 		self.started = False
+		self._volume = 100
+
+	@property
+	def volume(self):
+		return self._volume
+
+	@volume.setter
+	def volume(self, value: int):
+		if value <= 200:
+			try:
+				self.audio_buffer.VOLUME_PERCENTAGE = value
+			except AttributeError:
+				pass
+			self._volume = value
 
 	def load(self, path):
 		self.audio_buffer.load(path)
@@ -107,7 +131,7 @@ class Player:
 
 	@property
 	def audio_playing(self):
-		return not self.audio_player.should_start and self.playing and not self.paused
+		return self.audio_player.active
 
 	@property
 	def selected_channels(self):
@@ -175,6 +199,7 @@ class AudioBuffer:
 	PITCH_SHIFT = 0
 	TIME_SHIFT = 0
 	CHUNK_SIZE = 1024
+	VOLUME_PERCENTAGE = 100
 
 	def __init__(self, end_callback):
 		self.end_callback = end_callback
@@ -211,8 +236,10 @@ class AudioBuffer:
 
 	def set_buffer(self):
 		data = self.get_correct_amount_of_channels(self.get_selected_channels(self.sound_file.read(self.CHUNK_SIZE)))
-		data = self.pad_sound(data)
-		self.buffer.append(self.run_data_through_processes(data, self.processes))
+		padded_data = self.pad_sound(data)
+		data_with_effects = self.run_data_through_processes(padded_data, self.processes)
+		data_at_correct_volume = self.set_volume(data_with_effects)
+		self.buffer.append(data_at_correct_volume)
 
 	def seek(self, goto):
 		"""
@@ -271,6 +298,12 @@ class AudioBuffer:
 			return np.ndarray(buffer=data, shape=(data.shape[0], 1))
 		return data
 
+	def set_volume(self, data):
+		if self.VOLUME_PERCENTAGE != 100:
+			percent = self.VOLUME_PERCENTAGE/100
+			return data * percent
+		return data
+
 	def sum_to_mono(self, data):
 		sound_data = np.ndarray(buffer=np.average(data, axis=1), shape=(data.shape[0], 1))
 		return sound_data
@@ -303,6 +336,13 @@ class AudioThread:
 		self.should_start = False
 		self.should_stop = False
 
+	@property
+	def active(self):
+		try:
+			return self.stream.active
+		except AttributeError:
+			return False
+
 	def load(self, sample_rate, block, channels, callback):
 		self.reset()
 		self.stream = sd.OutputStream(samplerate=sample_rate, blocksize=block, channels=channels, callback=callback)
@@ -333,13 +373,14 @@ class AudioThread:
 
 
 if __name__ == "__main__":
-	p = PlayerProcess()
-	p.load(wav_path)
+	p = Player()
+	p.load(wav_96k)
+	p.audio_buffer.VOLUME_PERCENTAGE = 100
 	# while not p.audio_buffer.loaded:
 	# 	time.sleep(.001)
 	p.play()
-	time.sleep(5)
-	p.goto(10000)
+	# time.sleep(5)
+	# p.goto(10000)
 
 	while True:
 		time.sleep(1)
